@@ -25,6 +25,13 @@ export enum CoreRole {
   GUEST = 'guest'
 }
 
+export interface GatheringPattern {
+  frequency_type: 'weeks' | 'months';
+  interval: number;
+  day_of_week: number;
+  start_date: string;
+}
+
 export interface Person {
   id: UUID;
   name: string;
@@ -42,6 +49,7 @@ export interface Group {
   description?: string;
   link?: string;
   parent_id?: UUID | null;
+  gathering_pattern?: GatheringPattern;
 }
 
 export interface GroupMember {
@@ -49,6 +57,7 @@ export interface GroupMember {
   group_id: UUID;
   person_id: UUID;
   role: GroupRole;
+  service_role_id?: UUID | null; // Nytt felt: Spesifikk funksjon fra katalogen
 }
 
 /** Global Role Catalog */
@@ -60,7 +69,7 @@ export interface ServiceRole {
   is_active: boolean;
 }
 
-/** Link between a Group and a ServiceRole */
+/** Link between a Group and a ServiceRole (Defines which roles are valid for this group) */
 export interface GroupServiceRole {
   id: UUID;
   group_id: UUID;
@@ -78,7 +87,7 @@ export interface EventTemplate {
 
 export interface EventOccurrence {
   id: UUID;
-  template_id: UUID;
+  template_id: UUID | null;
   date: string;
   title_override?: string;
   status: OccurrenceStatus;
