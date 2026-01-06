@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { AppState, Group, GroupCategory, GroupRole, GroupMember, ServiceRole, GroupServiceRole, UUID, Person, CoreRole, GatheringPattern, OccurrenceStatus, EventOccurrence } from '../types';
-import { Users, Shield, Heart, MoreVertical, Plus, X, Trash2, Search, UserPlus, Check, ListChecks, Edit2, Star, Eye, Info, CheckCircle2, Phone, Mail, User as UserIcon, UserCheck, ShieldCheck, Power, Link as LinkIcon, ExternalLink, Library, ChevronDown, Calendar, Repeat, Clock, AlertCircle } from 'lucide-react';
+import { Users, Shield, Heart, Plus, X, Trash2, Search, UserPlus, Edit2, Star, Info, Library, ChevronDown, Calendar, Repeat, Clock } from 'lucide-react';
 
 interface Props {
   db: AppState;
@@ -17,11 +17,7 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [manageGroupId, setManageGroupId] = useState<UUID | null>(null);
   const [viewingGroupId, setViewingGroupId] = useState<UUID | null>(null);
-  const [editingServiceRole, setEditingServiceRole] = useState<ServiceRole | null>(null);
   const [isCreateServiceRoleModalOpen, setIsCreateServiceRoleModalOpen] = useState(false);
-  
-  // Person Modal States
-  const [editingPerson, setEditingPerson] = useState<Person | null>(null);
   const [isCreatePersonModalOpen, setIsCreatePersonModalOpen] = useState(false);
 
   // Samlingsplanlegging State (Manage mode only)
@@ -41,7 +37,6 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
   const managedGroup = db.groups.find(g => g.id === manageGroupId);
   const viewedGroup = db.groups.find(g => g.id === viewingGroupId);
 
-  // Sync tempPattern when group changes in MANAGE mode
   useEffect(() => {
     if (manageGroupId) {
       const group = db.groups.find(g => g.id === manageGroupId);
@@ -114,10 +109,14 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
     }));
   };
 
-  const handleUpdateMemberGroupRole = (memberId: UUID, role: GroupRole) => {
+  const handleToggleLeader = (memberId: UUID) => {
     setDb(prev => ({
       ...prev,
-      groupMembers: prev.groupMembers.map(gm => gm.id === memberId ? { ...gm, role: role } : gm)
+      groupMembers: prev.groupMembers.map(gm => 
+        gm.id === memberId 
+          ? { ...gm, role: gm.role === GroupRole.LEADER ? GroupRole.MEMBER : GroupRole.LEADER } 
+          : gm
+      )
     }));
   };
 
@@ -165,10 +164,9 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
       id: crypto.randomUUID(),
       name: formData.get('name') as string,
       email: formData.get('email') as string,
-      phone: formData.get('phone') as string,
-      core_role: formData.get('core_role') as CoreRole,
-      is_admin: formData.get('is_admin') === 'true',
-      is_active: true
+      is_admin: false,
+      is_active: true,
+      core_role: formData.get('core_role') as CoreRole
     };
     setDb(prev => ({ ...prev, persons: [...prev.persons, newPerson] }));
     setIsCreatePersonModalOpen(false);
@@ -252,7 +250,7 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredRoles.map(sr => (
-              <div key={sr.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm group hover:border-indigo-200 transition-all">
+              <div key={sr.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
                 <div className="p-2 bg-indigo-50 w-fit rounded-lg text-indigo-600 mb-3"><Library size={18} /></div>
                 <h4 className="font-bold text-slate-800 mb-1">{sr.name}</h4>
                 <p className="text-xs text-slate-500 line-clamp-2">{sr.description || 'Ingen beskrivelse.'}</p>
@@ -274,7 +272,7 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
             )}
           </div>
           <table className="w-full text-left">
-            <thead><tr className="border-b text-[10px] text-slate-400 uppercase tracking-widest font-bold"><th className="pb-3 px-4">Navn</th><th className="pb-3 px-4">Rolle</th><th className="pb-3 px-4">Kontakt</th></tr></thead>
+            <thead><tr className="border-b text-[10px] text-slate-400 uppercase tracking-widest font-bold"><th className="pb-3 px-4">Navn</th><th className="pb-3 px-4">Rolle</th><th className="pb-3 px-4">E-post</th></tr></thead>
             <tbody className="divide-y divide-slate-50">
               {filteredPersons.map(person => (
                 <tr key={person.id} className="group hover:bg-slate-50">
@@ -290,25 +288,37 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
         <div className="space-y-4">
           {isAdmin && <div className="flex justify-end"><button onClick={() => { setNewGroupCategory(activeTab as GroupCategory); setIsCreateModalOpen(true); }} className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-bold shadow flex items-center gap-2"><Plus size={16} /> Ny Gruppe</button></div>}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredGroups.map(group => (
-              <button key={group.id} onClick={() => setViewingGroupId(group.id)} className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm hover:shadow-md hover:border-indigo-200 transition-all group flex flex-col h-full relative overflow-hidden text-left w-full">
-                <div className="flex justify-between items-start mb-4 w-full">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-slate-50 rounded-lg">{getIcon(group.category)}</div>
-                    <h3 className="text-base font-bold text-slate-800">{group.name}</h3>
-                  </div>
-                  {isAdmin && (
-                    <div onClick={(e) => { e.stopPropagation(); setManageGroupId(group.id); }} className="p-1.5 text-slate-400 hover:text-indigo-600 bg-slate-50 rounded-lg">
-                      <Edit2 size={16} />
+            {filteredGroups.map(group => {
+              const members = db.groupMembers.filter(gm => gm.group_id === group.id);
+              const leaders = members.filter(m => m.role === GroupRole.LEADER).map(m => db.persons.find(p => p.id === m.person_id)?.name).filter(Boolean);
+              return (
+                <button key={group.id} onClick={() => setViewingGroupId(group.id)} className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm hover:shadow-md hover:border-indigo-200 transition-all group flex flex-col h-full relative overflow-hidden text-left w-full">
+                  <div className="flex justify-between items-start mb-4 w-full">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-slate-50 rounded-lg">{getIcon(group.category)}</div>
+                      <h3 className="text-base font-bold text-slate-800">{group.name}</h3>
                     </div>
-                  )}
-                </div>
-                <p className="text-slate-500 text-xs mb-4 flex-grow line-clamp-2">{group.description || 'Ingen beskrivelse.'}</p>
-                <div className="pt-4 border-t flex justify-between items-center w-full">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{db.groupMembers.filter(gm => gm.group_id === group.id).length} medlemmer</span>
-                </div>
-              </button>
-            ))}
+                    {isAdmin && (
+                      <div onClick={(e) => { e.stopPropagation(); setManageGroupId(group.id); }} className="p-1.5 text-slate-400 hover:text-indigo-600 bg-slate-50 rounded-lg">
+                        <Edit2 size={16} />
+                      </div>
+                    )}
+                  </div>
+                  <p className="text-slate-500 text-xs mb-4 flex-grow line-clamp-2">{group.description || 'Ingen beskrivelse.'}</p>
+                  <div className="pt-4 border-t space-y-2 w-full">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{members.length} medlemmer</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 overflow-hidden">
+                      <Star size={10} className="text-amber-500 fill-amber-500 shrink-0" />
+                      <p className="text-[10px] font-bold text-slate-600 truncate">
+                        Leder: {leaders.length > 0 ? leaders.join(', ') : 'Ingen valgt'}
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -354,6 +364,7 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
                             {gm.role === GroupRole.LEADER ? 'Leder' : role?.name || 'Medlem'}
                           </p>
                         </div>
+                        {gm.role === GroupRole.LEADER && <Star size={12} className="text-amber-500 fill-amber-500" />}
                       </div>
                     );
                   })}
@@ -406,12 +417,11 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
             </div>
             
             <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
-              {/* Venstre side: Konfigurasjon & Samlingsplan */}
               <div className="w-full md:w-1/3 p-8 border-r overflow-y-auto space-y-8 text-left">
                 <section className="space-y-4">
                   <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Grunninfo</h4>
                   <input type="text" value={managedGroup.name} onChange={e => handleUpdateGroupBasicInfo({ name: e.target.value })} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-indigo-500 outline-none" />
-                  <textarea value={managedGroup.description || ''} onChange={e => handleUpdateGroupBasicInfo({ description: e.target.value })} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm h-24 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Kort beskrivelse av gruppens formål..." />
+                  <textarea value={managedGroup.description || ''} onChange={e => handleUpdateGroupBasicInfo({ description: e.target.value })} className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm h-24 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Beskrivelse..." />
                 </section>
 
                 <section className="space-y-4 pt-6 border-t border-slate-100">
@@ -443,7 +453,6 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
                 </section>
               </div>
               
-              {/* Høyre side: Medlemsliste & Funksjonstildeling */}
               <div className="flex-1 p-8 bg-slate-50 overflow-y-auto space-y-6 text-left">
                 <section className="space-y-4">
                   <div className="flex justify-between items-center">
@@ -474,17 +483,19 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
                   <div className="space-y-3">
                     {db.groupMembers.filter(gm => gm.group_id === managedGroup.id).map(gm => {
                       const person = db.persons.find(p => p.id === gm.person_id);
+                      const isLeader = gm.role === GroupRole.LEADER;
                       return (
-                        <div key={gm.id} className={`flex items-center gap-4 p-4 bg-white border rounded-2xl shadow-sm transition-all ${gm.role === GroupRole.LEADER ? 'border-amber-400' : 'border-slate-200'}`}>
+                        <div key={gm.id} className={`flex items-center gap-4 p-4 bg-white border rounded-2xl shadow-sm transition-all ${isLeader ? 'border-amber-400 bg-amber-50/10' : 'border-slate-200'}`}>
                           <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center font-bold text-xs border border-slate-100">{person?.name.charAt(0)}</div>
                           <div className="flex-1 min-w-0">
-                            <p className="font-bold text-slate-800 text-sm">{person?.name}</p>
-                            <div className="flex gap-2 mt-1">
+                            <p className="font-bold text-slate-800 text-sm truncate">{person?.name}</p>
+                            <div className="flex items-center gap-2 mt-1">
                                <button 
-                                onClick={() => handleUpdateMemberGroupRole(gm.id, gm.role === GroupRole.LEADER ? GroupRole.MEMBER : GroupRole.LEADER)}
-                                className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-tighter border transition-colors ${gm.role === GroupRole.LEADER ? 'bg-amber-100 border-amber-300 text-amber-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-400 hover:text-amber-500'}`}
+                                onClick={() => handleToggleLeader(gm.id)}
+                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-tighter transition-all border ${isLeader ? 'bg-amber-100 border-amber-300 text-amber-700 shadow-sm' : 'bg-slate-50 border-slate-200 text-slate-400 hover:border-amber-200 hover:text-amber-500'}`}
                                >
-                                Leder
+                                <Star size={12} className={isLeader ? 'fill-amber-500' : ''} />
+                                Gruppeleder
                                </button>
                             </div>
                           </div>
@@ -493,7 +504,7 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
                               <select 
                                 value={gm.service_role_id || ''} 
                                 onChange={e => handleUpdateMemberRole(gm.id, e.target.value || null)}
-                                className="pl-3 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[10px] font-bold text-slate-700 outline-none appearance-none hover:bg-indigo-50 transition-colors cursor-pointer"
+                                className="pl-3 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[10px] font-bold text-slate-700 outline-none appearance-none hover:bg-indigo-50 transition-colors cursor-pointer min-w-[140px]"
                               >
                                 <option value="">Tildel tjeneste-rolle...</option>
                                 {db.serviceRoles.map(sr => <option key={sr.id} value={sr.id}>{sr.name}</option>)}
@@ -505,12 +516,6 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
                         </div>
                       );
                     })}
-                    {db.groupMembers.filter(gm => gm.group_id === managedGroup.id).length === 0 && (
-                      <div className="py-16 text-center border-2 border-dashed border-slate-100 rounded-3xl">
-                        <Users size={32} className="mx-auto text-slate-200 mb-3" />
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Ingen medlemmer ennå</p>
-                      </div>
-                    )}
                   </div>
                 </section>
               </div>
@@ -530,8 +535,8 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
             <div className="p-6 bg-indigo-700 text-white flex justify-between items-center"><h3 className="text-xl font-bold">Ny Katalogrolle</h3><button onClick={() => setIsCreateServiceRoleModalOpen(false)}><X size={24} /></button></div>
             <form onSubmit={handleCreateServiceRole} className="p-8 space-y-4">
               <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Navn</label><input autoFocus required name="name" type="text" className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" placeholder="f.eks. Møteleder" /></div>
-              <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Beskrivelse</label><textarea name="description" className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm h-24" placeholder="Kort beskrivelse av rollen..." /></div>
-              <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Instrukser (per linje)</label><textarea name="instructions" className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm h-32 font-mono" placeholder="Oppgave 1&#10;Oppgave 2" /></div>
+              <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Beskrivelse</label><textarea name="description" className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm h-24" placeholder="Beskrivelse..." /></div>
+              <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Instrukser (per linje)</label><textarea name="instructions" className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm h-32" /></div>
               <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg hover:bg-indigo-700 transition-all">Opprett Rolle</button>
             </form>
           </div>
@@ -547,7 +552,7 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
             <form onSubmit={handleCreatePerson} className="p-8 space-y-4">
               <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Fullt Navn</label><input autoFocus required name="name" type="text" className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" /></div>
               <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">E-post</label><input required name="email" type="email" className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" /></div>
-              <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Hovedrolle i menigheten</label><select name="core_role" className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm"><option value={CoreRole.MEMBER}>Medlem</option><option value={CoreRole.TEAM_LEADER}>Gruppeleder</option><option value={CoreRole.PASTOR}>Pastor</option><option value={CoreRole.ADMIN}>Administrator</option></select></div>
+              <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Hovedrolle</label><select name="core_role" className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm"><option value={CoreRole.MEMBER}>Medlem</option><option value={CoreRole.TEAM_LEADER}>Gruppeleder</option><option value={CoreRole.PASTOR}>Pastor</option><option value={CoreRole.ADMIN}>Administrator</option></select></div>
               <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg hover:bg-indigo-700 transition-all">Legg til Person</button>
             </form>
           </div>
@@ -561,7 +566,7 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
           <div className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden text-left animate-in zoom-in-95">
             <div className="p-6 bg-indigo-700 text-white flex justify-between items-center"><h3 className="text-xl font-bold">Opprett ny Gruppe</h3><button onClick={() => setIsCreateModalOpen(false)}><X size={24} /></button></div>
             <form onSubmit={handleCreateGroup} className="p-8 space-y-4">
-              <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Navn</label><input autoFocus required type="text" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" placeholder="f.eks. Husgruppe Sør" /></div>
+              <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Navn</label><input autoFocus required type="text" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" placeholder="Navn..." /></div>
               <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg hover:bg-indigo-700 transition-all">Opprett</button>
             </form>
           </div>
