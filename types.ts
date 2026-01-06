@@ -37,6 +37,7 @@ export interface Person {
   name: string;
   email: string;
   phone?: string;
+  social_security_number?: string;
   is_admin: boolean;
   is_active: boolean;
   core_role: CoreRole;

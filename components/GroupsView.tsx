@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { AppState, Group, GroupCategory, GroupRole, GroupMember, ServiceRole, GroupServiceRole, UUID, Person, CoreRole, GatheringPattern, OccurrenceStatus, EventOccurrence } from '../types';
-import { Users, Shield, Heart, Plus, X, Trash2, Search, UserPlus, Edit2, Star, Info, Library, ChevronDown, Calendar, Repeat, Clock } from 'lucide-react';
+import { Users, Shield, Heart, Plus, X, Trash2, Search, UserPlus, Edit2, Star, Info, Library, ChevronDown, Calendar, Repeat, Clock, Phone, Mail, User as UserIcon, ShieldCheck } from 'lucide-react';
 
 interface Props {
   db: AppState;
@@ -19,6 +19,7 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
   const [viewingGroupId, setViewingGroupId] = useState<UUID | null>(null);
   const [isCreateServiceRoleModalOpen, setIsCreateServiceRoleModalOpen] = useState(false);
   const [isCreatePersonModalOpen, setIsCreatePersonModalOpen] = useState(false);
+  const [editingPerson, setEditingPerson] = useState<Person | null>(null);
 
   // Samlingsplanlegging State (Manage mode only)
   const [tempPattern, setTempPattern] = useState<GatheringPattern | null>(null);
@@ -164,12 +165,45 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
       id: crypto.randomUUID(),
       name: formData.get('name') as string,
       email: formData.get('email') as string,
-      is_admin: false,
+      phone: formData.get('phone') as string,
+      social_security_number: formData.get('ssn') as string,
+      is_admin: formData.get('is_admin') === 'true',
       is_active: true,
       core_role: formData.get('core_role') as CoreRole
     };
     setDb(prev => ({ ...prev, persons: [...prev.persons, newPerson] }));
     setIsCreatePersonModalOpen(false);
+  };
+
+  const handleUpdatePerson = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPerson) return;
+    const formData = new FormData(e.currentTarget as HTMLFormElement);
+    const updatedPerson: Person = {
+      ...editingPerson,
+      name: formData.get('name') as string,
+      email: formData.get('email') as string,
+      phone: formData.get('phone') as string,
+      social_security_number: formData.get('ssn') as string,
+      is_admin: formData.get('is_admin') === 'true',
+      core_role: formData.get('core_role') as CoreRole
+    };
+    setDb(prev => ({
+      ...prev,
+      persons: prev.persons.map(p => p.id === editingPerson.id ? updatedPerson : p)
+    }));
+    setEditingPerson(null);
+  };
+
+  const handleDeletePerson = (id: UUID) => {
+    if (!confirm('Er du sikker på at du vil slette denne personen? Vedkommende vil bli fjernet fra alle grupper og vakter.')) return;
+    setDb(prev => ({
+      ...prev,
+      persons: prev.persons.filter(p => p.id !== id),
+      groupMembers: prev.groupMembers.filter(gm => gm.person_id !== id),
+      assignments: prev.assignments.map(a => a.person_id === id ? { ...a, person_id: null } : a),
+      programItems: prev.programItems.map(p => p.person_id === id ? { ...p, person_id: null } : p)
+    }));
   };
 
   const handleCreateServiceRole = (e: React.FormEvent) => {
@@ -271,18 +305,29 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
               </button>
             )}
           </div>
-          <table className="w-full text-left">
-            <thead><tr className="border-b text-[10px] text-slate-400 uppercase tracking-widest font-bold"><th className="pb-3 px-4">Navn</th><th className="pb-3 px-4">Rolle</th><th className="pb-3 px-4">E-post</th></tr></thead>
-            <tbody className="divide-y divide-slate-50">
-              {filteredPersons.map(person => (
-                <tr key={person.id} className="group hover:bg-slate-50">
-                  <td className="py-3 px-4"><div className="flex items-center gap-3 font-semibold text-sm">{person.name}</div></td>
-                  <td className="py-3 px-4"><span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${getCoreRoleColor(person.core_role)}`}>{getCoreRoleLabel(person.core_role)}</span></td>
-                  <td className="py-3 px-4 text-[11px] text-slate-500">{person.email}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead><tr className="border-b text-[10px] text-slate-400 uppercase tracking-widest font-bold"><th className="pb-3 px-4">Navn</th><th className="pb-3 px-4">Rolle</th><th className="pb-3 px-4">E-post</th><th className="pb-3 px-4">Telefon</th><th className="pb-3 px-4 text-right">Handling</th></tr></thead>
+              <tbody className="divide-y divide-slate-50">
+                {filteredPersons.map(person => (
+                  <tr key={person.id} className="group hover:bg-slate-50">
+                    <td className="py-3 px-4"><div className="flex items-center gap-3 font-semibold text-sm">{person.name}</div></td>
+                    <td className="py-3 px-4"><span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${getCoreRoleColor(person.core_role)}`}>{getCoreRoleLabel(person.core_role)}</span></td>
+                    <td className="py-3 px-4 text-[11px] text-slate-500">{person.email}</td>
+                    <td className="py-3 px-4 text-[11px] text-slate-500">{person.phone || '-'}</td>
+                    <td className="py-3 px-4 text-right">
+                      {isAdmin && (
+                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                          <button onClick={() => setEditingPerson(person)} className="p-1.5 text-slate-400 hover:text-indigo-600 bg-slate-100 rounded-lg"><Edit2 size={14} /></button>
+                          <button onClick={() => handleDeletePerson(person.id)} className="p-1.5 text-slate-400 hover:text-rose-600 bg-slate-100 rounded-lg"><Trash2 size={14} /></button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
@@ -543,17 +588,56 @@ const GroupsView: React.FC<Props> = ({ db, setDb, isAdmin, initialViewGroupId })
         </div>
       )}
 
-      {/* Ny Person Modal */}
-      {isCreatePersonModalOpen && (
+      {/* Ny/Rediger Person Modal */}
+      {(isCreatePersonModalOpen || editingPerson) && (
         <div className="fixed inset-0 z-[140] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => setIsCreatePersonModalOpen(false)}></div>
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => { setIsCreatePersonModalOpen(false); setEditingPerson(null); }}></div>
           <div className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden text-left animate-in zoom-in-95">
-            <div className="p-6 bg-indigo-700 text-white flex justify-between items-center"><h3 className="text-xl font-bold">Registrer Ny Person</h3><button onClick={() => setIsCreatePersonModalOpen(false)}><X size={24} /></button></div>
-            <form onSubmit={handleCreatePerson} className="p-8 space-y-4">
-              <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Fullt Navn</label><input autoFocus required name="name" type="text" className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" /></div>
-              <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">E-post</label><input required name="email" type="email" className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" /></div>
-              <div><label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Hovedrolle</label><select name="core_role" className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm"><option value={CoreRole.MEMBER}>Medlem</option><option value={CoreRole.TEAM_LEADER}>Gruppeleder</option><option value={CoreRole.PASTOR}>Pastor</option><option value={CoreRole.ADMIN}>Administrator</option></select></div>
-              <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg hover:bg-indigo-700 transition-all">Legg til Person</button>
+            <div className="p-6 bg-indigo-700 text-white flex justify-between items-center">
+              <h3 className="text-xl font-bold">{editingPerson ? 'Rediger Person' : 'Registrer Ny Person'}</h3>
+              <button onClick={() => { setIsCreatePersonModalOpen(false); setEditingPerson(null); }}><X size={24} /></button>
+            </div>
+            <form onSubmit={editingPerson ? handleUpdatePerson : handleCreatePerson} className="p-8 space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Fullt Navn</label>
+                <input autoFocus required name="name" type="text" defaultValue={editingPerson?.name || ''} className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">E-post</label>
+                  <input required name="email" type="email" defaultValue={editingPerson?.email || ''} className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Telefonnummer</label>
+                  <input name="phone" type="tel" defaultValue={editingPerson?.phone || ''} className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Personnummer (11 siffer)</label>
+                <input name="ssn" type="text" maxLength={11} defaultValue={editingPerson?.social_security_number || ''} className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-mono" placeholder="DDMMYYXXXXX" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Hovedrolle</label>
+                  <select name="core_role" defaultValue={editingPerson?.core_role || CoreRole.MEMBER} className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+                    <option value={CoreRole.MEMBER}>Medlem</option>
+                    <option value={CoreRole.TEAM_LEADER}>Gruppeleder</option>
+                    <option value={CoreRole.PASTOR}>Pastor</option>
+                    <option value={CoreRole.ADMIN}>Administrator</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Systemtilgang</label>
+                  <select name="is_admin" defaultValue={editingPerson?.is_admin ? 'true' : 'false'} className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+                    <option value="false">Standard Bruker</option>
+                    <option value="true">Administrator</option>
+                  </select>
+                </div>
+              </div>
+              <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 mt-2">
+                {editingPerson ? <ShieldCheck size={20}/> : <Plus size={20} />}
+                {editingPerson ? 'Oppdater Person' : 'Lagre Person'}
+              </button>
             </form>
           </div>
         </div>
