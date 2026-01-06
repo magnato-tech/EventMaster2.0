@@ -1,0 +1,496 @@
+
+import React, { useState, useMemo } from 'react';
+import { AppState, EventOccurrence, RoleDefinition, UUID, ProgramItem, GroupCategory, Person } from '../types';
+import { ChevronLeft, ChevronRight, Plus, UserPlus, X, Trash2, ListChecks, Info, CheckCircle2, Calendar as CalendarIcon, Repeat, LayoutGrid, List as ListIcon, Clock, Users, User, Shield, AlertTriangle, RefreshCw, UserCheck, Sparkles, ArrowRight } from 'lucide-react';
+
+interface Props {
+  db: AppState;
+  isAdmin: boolean;
+  onUpdateAssignment: (id: string, personId: string | null) => void;
+  onAddAssignment: (occurrenceId: string, roleId: string) => void;
+  onSyncStaffing: (occurrenceId: string) => void;
+  onCreateOccurrence: (templateId: string, date: string) => void;
+  onCreateRecurring: (templateId: string, startDate: string, count: number, intervalDays: number) => void;
+  onAddProgramItem: (item: ProgramItem) => void;
+  onUpdateProgramItem: (id: string, updates: Partial<ProgramItem>) => void;
+  onDeleteProgramItem: (id: string) => void;
+}
+
+const CalendarView: React.FC<Props> = ({ 
+  db, isAdmin, onUpdateAssignment, onAddAssignment, onSyncStaffing, onCreateOccurrence, onCreateRecurring, 
+  onAddProgramItem, onUpdateProgramItem, onDeleteProgramItem 
+}) => {
+  const [selectedOccId, setSelectedOccId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('calendar');
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [activeTab, setActiveTab] = useState<'staff' | 'program'>('program');
+
+  const [isProgramModalOpen, setIsProgramModalOpen] = useState(false);
+  const [isAddRoleModalOpen, setIsAddRoleModalOpen] = useState(false);
+  const [roleInstructionsId, setRoleInstructionsId] = useState<string | null>(null);
+  const [progTitle, setProgTitle] = useState('');
+  const [progDuration, setProgDuration] = useState(5);
+  const [progRoleId, setProgRoleId] = useState<string>('');
+  const [progGroupId, setProgGroupId] = useState<string>('');
+  
+  const occurrences = [...db.eventOccurrences].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const selectedOcc = db.eventOccurrences.find(o => o.id === selectedOccId);
+
+  const getTemplateTitle = (tid: string) => db.eventTemplates.find(t => t.id === tid)?.title || 'Ukjent';
+
+  const calendarDays = useMemo(() => {
+    const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
+    const firstDayOfMonth = new Date(year, month, 1);
+    const lastDayOfMonth = new Date(year, month + 1, 0);
+    const startDay = firstDayOfMonth.getDay() === 0 ? 6 : firstDayOfMonth.getDay() - 1;
+    const daysInMonth = lastDayOfMonth.getDate();
+    const days = [];
+    const prevMonthLastDay = new Date(year, month, 0).getDate();
+    for (let i = startDay - 1; i >= 0; i--) {
+      days.push({ date: new Date(year, month - 1, prevMonthLastDay - i), isCurrentMonth: false });
+    }
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push({ date: new Date(year, month, i), isCurrentMonth: true });
+    }
+    const remainingSlots = 42 - days.length;
+    for (let i = 1; i <= remainingSlots; i++) {
+      days.push({ date: new Date(year, month + 1, i), isCurrentMonth: false });
+    }
+    return days;
+  }, [currentDate]);
+
+  const nextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1));
+  const prevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
+
+  const getOccurrencesForDate = (date: Date) => {
+    const dateStr = date.toISOString().split('T')[0];
+    return db.eventOccurrences.filter(o => o.date === dateStr);
+  };
+
+  const handleAddProgramItem = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedOcc || !progTitle.trim()) return;
+    const items = db.programItems.filter(p => p.occurrence_id === selectedOcc.id);
+    const newItem: ProgramItem = {
+      id: crypto.randomUUID(),
+      occurrence_id: selectedOcc.id,
+      template_id: null,
+      title: progTitle,
+      duration_minutes: progDuration,
+      role_id: progRoleId || null,
+      group_id: progGroupId || null,
+      order: items.length
+    };
+    onAddProgramItem(newItem);
+    setProgTitle('');
+    setIsProgramModalOpen(false);
+  };
+
+  const getCategorizedPersons = (roleId?: string | null, groupId?: string | null) => {
+    const allActive = db.persons.filter(p => p.is_active);
+    let recommended: Person[] = [];
+    if (roleId) {
+      const role = db.roleDefinitions.find(r => r.id === roleId);
+      if (role) {
+        const members = db.groupMembers.filter(gm => gm.group_id === role.group_id);
+        recommended = allActive.filter(p => members.some(m => m.person_id === p.id));
+      }
+    } else if (groupId) {
+      const members = db.groupMembers.filter(gm => gm.group_id === groupId);
+      recommended = allActive.filter(p => members.some(m => m.person_id === p.id));
+    }
+    const others = allActive.filter(p => !recommended.some(r => r.id === p.id));
+    return { recommended, others };
+  };
+
+  const formatTimeFromOffset = (offsetMinutes: number) => {
+    const baseHour = 11;
+    const baseMinute = 0;
+    const totalMinutes = baseHour * 60 + baseMinute + offsetMinutes;
+    const h = Math.floor(totalMinutes / 60) % 24;
+    const m = Math.floor(totalMinutes % 60);
+    return `${h.toString().padStart(2, '0')}.${m.toString().padStart(2, '0')}`;
+  };
+
+  const programWithTimes = useMemo(() => {
+    if (!selectedOcc) return [];
+    const items = db.programItems
+      .filter(p => p.occurrence_id === selectedOcc.id)
+      .sort((a, b) => a.order - b.order);
+    let currentOffset = 0;
+    return items.map((item, idx) => {
+      let startTimeOffset = currentOffset;
+      if (idx === 0 && item.order === 0) startTimeOffset = -item.duration_minutes;
+      const formattedTime = formatTimeFromOffset(startTimeOffset);
+      if (idx === 0 && item.order === 0) currentOffset = 0;
+      else currentOffset += item.duration_minutes;
+      return { ...item, formattedTime };
+    });
+  }, [selectedOcc, db.programItems]);
+
+  const instructionRole = db.roleDefinitions.find(rd => rd.id === roleInstructionsId);
+
+  return (
+    <div className="space-y-6 max-w-5xl mx-auto pb-20 md:pb-0 animate-in fade-in duration-500 text-left">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-slate-800">Planleggingskalender</h2>
+          <p className="text-xs text-slate-500">Administrer gudstjenester og vaktplaner.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="bg-slate-200 p-1 rounded-lg flex">
+            <button onClick={() => setViewMode('list')} className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'}`}><ListIcon size={16} /></button>
+            <button onClick={() => setViewMode('calendar')} className={`p-1.5 rounded-md transition-all ${viewMode === 'calendar' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'}`}><LayoutGrid size={16} /></button>
+          </div>
+        </div>
+      </div>
+
+      {viewMode === 'list' ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 text-left">
+          {occurrences.map(occ => (
+            <button key={occ.id} onClick={() => { setSelectedOccId(occ.id); setActiveTab('program'); }} className={`text-left p-4 rounded-xl border transition-all ${selectedOccId === occ.id ? 'bg-white border-indigo-600 shadow-sm' : 'bg-white border-slate-100 hover:border-indigo-200'}`}>
+              <div className="flex justify-between items-start mb-2">
+                <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest">{new Intl.DateTimeFormat('no-NO', { weekday: 'short' }).format(new Date(occ.date))}</span>
+                <span className={`text-[9px] px-1.5 py-0.5 rounded uppercase font-bold ${occ.status === 'published' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>{occ.status}</span>
+              </div>
+              <h3 className="text-base font-bold text-slate-800 mb-0.5">{occ.title_override || getTemplateTitle(occ.template_id)}</h3>
+              <p className="text-slate-500 text-xs">{new Intl.DateTimeFormat('no-NO', { day: 'numeric', month: 'short' }).format(new Date(occ.date))}</p>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="p-4 border-b flex items-center justify-between">
+            <h3 className="text-lg font-bold text-slate-800">{new Intl.DateTimeFormat('no-NO', { month: 'long', year: 'numeric' }).format(currentDate)}</h3>
+            <div className="flex gap-1">
+              <button onClick={prevMonth} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600"><ChevronLeft size={18} /></button>
+              <button onClick={() => setCurrentDate(new Date())} className="px-3 py-1.5 text-xs font-bold text-slate-500 hover:text-indigo-600">I dag</button>
+              <button onClick={nextMonth} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-600"><ChevronRight size={18} /></button>
+            </div>
+          </div>
+          <div className="grid grid-cols-7 text-center">
+            {['Man', 'Tir', 'Ons', 'Tor', 'Fre', 'Lør', 'Søn'].map(day => (<div key={day} className="py-2 text-[9px] font-bold text-slate-400 uppercase tracking-widest border-b border-r last:border-r-0">{day}</div>))}
+            {calendarDays.map((day, i) => {
+              const occs = getOccurrencesForDate(day.date);
+              const isToday = new Date().toISOString().split('T')[0] === day.date.toISOString().split('T')[0];
+              return (
+                <div key={i} className={`min-h-[100px] p-1.5 border-b border-r last:border-r-0 group transition-colors ${day.isCurrentMonth ? 'bg-white' : 'bg-slate-50/50 text-slate-300'}`}>
+                  <div className="flex justify-between items-center mb-1">
+                    <span className={`text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full ${isToday ? 'bg-indigo-600 text-white' : ''}`}>{day.date.getDate()}</span>
+                    {isAdmin && day.isCurrentMonth && <button onClick={() => onCreateOccurrence(db.eventTemplates[0]?.id, day.date.toISOString().split('T')[0])} className="opacity-0 group-hover:opacity-100 p-0.5 text-indigo-400 hover:text-indigo-600"><Plus size={12} /></button>}
+                  </div>
+                  <div className="space-y-1">
+                    {occs.map(occ => (<button key={occ.id} onClick={() => { setSelectedOccId(occ.id); setActiveTab('program'); }} className={`w-full text-left px-1.5 py-0.5 rounded text-[9px] font-bold border truncate transition-all ${selectedOccId === occ.id ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-100'}`}>{occ.title_override || getTemplateTitle(occ.template_id)}</button>))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {selectedOcc && (
+        <div className="fixed top-0 bottom-0 right-0 left-0 md:left-64 z-[60] bg-white flex flex-col animate-in slide-in-from-right duration-300 border-l shadow-2xl">
+          <div className="px-6 py-4 border-b flex justify-between items-center bg-slate-50 shrink-0">
+            <div className="text-left">
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-700 text-[9px] font-bold uppercase rounded">Planlegging</span>
+                <p className="text-xs text-slate-500">{new Intl.DateTimeFormat('no-NO', { dateStyle: 'long' }).format(new Date(selectedOcc.date))}</p>
+              </div>
+              <h3 className="text-xl font-bold text-slate-900">{selectedOcc.title_override || getTemplateTitle(selectedOcc.template_id)}</h3>
+            </div>
+            <button onClick={() => setSelectedOccId(null)} className="p-2 bg-slate-200 hover:bg-slate-300 rounded-xl transition-all group">
+              <X size={20} className="text-slate-600" />
+            </button>
+          </div>
+          
+          <div className="flex bg-slate-50 border-b shrink-0 px-6">
+            <button onClick={() => setActiveTab('program')} className={`px-6 py-3 text-xs font-bold border-b-2 transition-all ${activeTab === 'program' ? 'border-indigo-600 text-indigo-700 bg-white' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>1. Kjøreplan</button>
+            <button onClick={() => setActiveTab('staff')} className={`px-6 py-3 text-xs font-bold border-b-2 transition-all ${activeTab === 'staff' ? 'border-indigo-600 text-indigo-700 bg-white' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>2. Vaktplan & Bemanning</button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6 bg-white">
+            <div className="max-w-4xl mx-auto">
+              {activeTab === 'program' ? (
+                <div className="space-y-6 animate-in fade-in duration-300">
+                  <div className="flex justify-between items-center border-b pb-3 border-slate-100">
+                    <h2 className="text-base font-bold text-slate-800 uppercase tracking-tight">Programoversikt</h2>
+                    {isAdmin && (
+                      <button onClick={() => setIsProgramModalOpen(true)} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-[11px] font-bold shadow hover:bg-indigo-700 transition-all flex items-center gap-1.5">
+                        <Plus size={14} /> Ny Aktivitet
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    {programWithTimes.map((item, idx) => {
+                      const role = db.roleDefinitions.find(r => r.id === item.role_id);
+                      const group = db.groups.find(g => g.id === item.group_id);
+                      const person = db.persons.find(p => p.id === item.person_id);
+                      const { recommended, others } = getCategorizedPersons(item.role_id, item.group_id);
+                      
+                      return (
+                        <div key={item.id} className="p-3 bg-white border border-slate-100 rounded-xl hover:border-indigo-200 transition-all text-left group">
+                          <div className="flex items-center gap-4">
+                            <div className="flex flex-col items-center shrink-0 w-14 text-center border-r pr-4">
+                              <span className="text-xs font-bold text-indigo-600 leading-none mb-1">{item.formattedTime}</span>
+                              <span className="text-[9px] text-slate-400 font-bold uppercase tracking-tighter">{item.duration_minutes}m</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex justify-between items-center">
+                                <h5 className="font-bold text-slate-800 text-sm truncate mr-2">{item.title}</h5>
+                                {isAdmin && (
+                                  <button onClick={() => onDeleteProgramItem(item.id)} className="text-slate-200 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all">
+                                    <Trash2 size={14}/>
+                                  </button>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3 mt-1">
+                                {role && <span className="text-[9px] text-indigo-600 font-bold uppercase tracking-wider bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 flex items-center gap-1"><Shield size={10}/> {role.title}</span>}
+                                {group && <span className="text-[9px] text-teal-600 font-bold uppercase tracking-wider bg-teal-50 px-1.5 py-0.5 rounded border border-teal-100 flex items-center gap-1"><Users size={10}/> {group.name}</span>}
+                                
+                                <div className="ml-auto min-w-[180px]">
+                                  {isAdmin ? (
+                                    <select 
+                                      className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded text-[10px] outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                                      value={item.person_id || ''}
+                                      onChange={(e) => onUpdateProgramItem(item.id, { person_id: e.target.value || null })}
+                                    >
+                                      <option value="">Tildel...</option>
+                                      {recommended.length > 0 && (
+                                        <optgroup label="Team">
+                                          {recommended.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                        </optgroup>
+                                      )}
+                                      <optgroup label="Alle">
+                                        {others.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                      </optgroup>
+                                    </select>
+                                  ) : person && (
+                                    <div className="flex items-center gap-1.5 text-[10px] text-slate-600 font-bold">
+                                      <div className="w-4 h-4 rounded-full bg-indigo-100 flex items-center justify-center text-[8px] text-indigo-700">{person.name.charAt(0)}</div>
+                                      {person.name}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {programWithTimes.length === 0 && (
+                      <div className="py-12 text-center border-2 border-dashed border-slate-50 rounded-xl">
+                        <p className="text-slate-300 text-xs">Ingen aktiviteter lagt til.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-6 animate-in fade-in duration-300">
+                  <div className="flex justify-between items-center bg-indigo-600 px-4 py-3 rounded-xl shadow-md text-white">
+                    <div className="text-left flex items-center gap-3">
+                      <Sparkles size={18} className="text-indigo-200" />
+                      <p className="text-[11px] text-indigo-50 leading-tight">Opprett vakter automatisk basert på kjøreplanen.</p>
+                    </div>
+                    {isAdmin && (
+                      <button 
+                        onClick={() => onSyncStaffing(selectedOcc.id)} 
+                        className="px-4 py-1.5 bg-white text-indigo-700 rounded-lg text-[10px] font-bold hover:bg-indigo-50 transition-all flex items-center gap-2"
+                      >
+                        <RefreshCw size={12} /> Synkroniser
+                      </button>
+                    )}
+                  </div>
+
+                  <section>
+                    <div className="flex justify-between items-center mb-3">
+                      <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Vaktliste</h4>
+                      {isAdmin && (
+                        <button onClick={() => setIsAddRoleModalOpen(true)} className="flex items-center gap-1.5 text-[10px] font-bold text-indigo-600 hover:text-indigo-700">
+                          <Plus size={12} /> Legg til manuelt
+                        </button>
+                      )}
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {db.assignments.filter(a => a.occurrence_id === selectedOcc.id).map(assign => {
+                        const role = db.roleDefinitions.find(r => r.id === assign.role_id);
+                        const person = db.persons.find(p => p.id === assign.person_id);
+                        const { recommended, others } = getCategorizedPersons(assign.role_id);
+                        return (
+                          <div key={assign.id} className={`p-3 bg-white border rounded-xl shadow-sm flex flex-col gap-2 transition-all ${person ? 'border-slate-100' : 'border-amber-100 bg-amber-50/20'}`}>
+                            <div className="flex justify-between items-start">
+                              <div className="flex items-center gap-2">
+                                <Shield size={12} className="text-indigo-400" />
+                                <div className="flex items-center gap-1.5">
+                                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none">{role?.title}</p>
+                                  {role && (
+                                    <button 
+                                      onClick={() => setRoleInstructionsId(role.id)} 
+                                      className="text-slate-300 hover:text-indigo-600 transition-colors"
+                                      title="Se instruks"
+                                    >
+                                      <div className="w-3.5 h-3.5 rounded-full border border-current flex items-center justify-center">
+                                        <Info size={8} strokeWidth={3} />
+                                      </div>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                              {!person && <AlertTriangle size={12} className="text-amber-500" />}
+                            </div>
+                            <p className={`text-sm font-bold leading-tight ${person ? 'text-slate-800' : 'text-slate-300 italic'}`}>
+                              {person?.name || 'Ledig vakt'}
+                            </p>
+                            {isAdmin && (
+                              <select 
+                                className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded text-[10px] outline-none focus:ring-2 focus:ring-indigo-500 font-bold text-slate-700 mt-1" 
+                                value={assign.person_id || ''} 
+                                onChange={(e) => onUpdateAssignment(assign.id, e.target.value || null)}
+                              >
+                                <option value="">Tildel person...</option>
+                                {recommended.length > 0 && (
+                                  <optgroup label="Team">
+                                    {recommended.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                  </optgroup>
+                                )}
+                                <optgroup label="Alle">
+                                  {others.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                </optgroup>
+                              </select>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {db.assignments.filter(a => a.occurrence_id === selectedOcc.id).length === 0 && (
+                        <div className="col-span-full py-12 text-center border-2 border-dashed border-slate-50 rounded-xl">
+                          <p className="text-slate-300 text-xs">Vaktlisten er tom.</p>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="px-6 py-4 bg-slate-900 border-t shrink-0 flex justify-end items-center text-white">
+            <button onClick={() => setSelectedOccId(null)} className="px-8 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-lg hover:bg-indigo-700 transition-all flex items-center gap-2">
+              <CheckCircle2 size={16} /> Ferdig planlagt
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Instruks-Modal for Roller */}
+      {roleInstructionsId && instructionRole && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="relative bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden animate-in zoom-in-95 duration-200 text-left">
+            <div className="p-4 bg-indigo-700 text-white flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Info size={18} />
+                <h3 className="text-sm font-bold">Instruks: {instructionRole.title}</h3>
+              </div>
+              <button onClick={() => setRoleInstructionsId(null)}><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="space-y-2.5">
+                {instructionRole.default_tasks.length > 0 ? (
+                  instructionRole.default_tasks.filter(t => t.trim()).map((task, i) => (
+                    <div key={i} className="flex gap-3 text-left items-start">
+                      <div className="mt-1 w-4 h-4 rounded-full border-2 border-indigo-200 flex-shrink-0 flex items-center justify-center">
+                        <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                      </div>
+                      <p className="text-slate-600 text-xs leading-relaxed font-medium">{task}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-slate-400 text-xs italic text-center py-4">Ingen spesifikke instrukser er definert for denne rollen.</p>
+                )}
+              </div>
+              <button 
+                onClick={() => setRoleInstructionsId(null)} 
+                className="w-full py-2 bg-slate-100 text-slate-600 rounded-xl font-bold text-xs hover:bg-slate-200 transition-all"
+              >
+                Lukk
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modals for Adding Program/Role - Standard compact sizes */}
+      {isAddRoleModalOpen && selectedOcc && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="relative bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden animate-in zoom-in-95 duration-200 text-left">
+            <div className="p-4 bg-indigo-700 text-white flex justify-between items-center">
+              <h3 className="text-sm font-bold">Legg til tjeneste</h3>
+              <button onClick={() => setIsAddRoleModalOpen(false)}><X size={18} /></button>
+            </div>
+            <div className="p-4 space-y-2 max-h-[60vh] overflow-y-auto">
+              {db.roleDefinitions.map(role => {
+                const alreadyExists = db.assignments.some(a => a.occurrence_id === selectedOcc.id && a.role_id === role.id);
+                return (
+                  <button 
+                    key={role.id} 
+                    disabled={alreadyExists}
+                    onClick={() => { onAddAssignment(selectedOcc.id, role.id); setIsAddRoleModalOpen(false); }}
+                    className={`w-full p-3 rounded-lg border text-left flex justify-between items-center transition-all ${alreadyExists ? 'bg-slate-50 border-slate-100 opacity-50 cursor-not-allowed' : 'bg-white border-slate-100 hover:border-indigo-500 hover:bg-indigo-50'}`}
+                  >
+                    <div>
+                      <p className="font-bold text-slate-800 text-xs">{role.title}</p>
+                      <p className="text-[9px] text-slate-400 font-bold uppercase mt-0.5">{db.groups.find(g => g.id === role.group_id)?.name}</p>
+                    </div>
+                    {alreadyExists ? <CheckCircle2 size={14} className="text-emerald-500" /> : <Plus size={14} className="text-indigo-400" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isProgramModalOpen && selectedOcc && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="relative bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden animate-in zoom-in-95 duration-200 text-left">
+            <div className="p-4 bg-indigo-700 text-white flex justify-between items-center">
+              <h3 className="text-sm font-bold">Ny Aktivitet</h3>
+              <button onClick={() => setIsProgramModalOpen(false)}><X size={18} /></button>
+            </div>
+            <form onSubmit={handleAddProgramItem} className="p-5 space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Tittel</label>
+                <input autoFocus required type="text" value={progTitle} onChange={e => setProgTitle(e.target.value)} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm" placeholder="f.eks. Velkomst" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Varighet (min)</label>
+                <input required type="number" min="1" value={progDuration} onChange={e => setProgDuration(parseInt(e.target.value) || 5)} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Rolle</label>
+                  <select value={progRoleId} onChange={e => { setProgRoleId(e.target.value); if(e.target.value) setProgGroupId(''); }} className="w-full px-2 py-2 border rounded-lg text-[11px] font-medium outline-none">
+                    <option value="">Ingen</option>
+                    {db.roleDefinitions.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Team</label>
+                  <select value={progGroupId} onChange={e => { setProgGroupId(e.target.value); if(e.target.value) setProgRoleId(''); }} className="w-full px-2 py-2 border rounded-lg text-[11px] font-medium outline-none">
+                    <option value="">Ingen</option>
+                    {db.groups.filter(g => g.category === GroupCategory.SERVICE).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <button type="submit" className="w-full py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow-md hover:bg-indigo-700 transition-all">Lagre i kjøreplan</button>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default CalendarView;
