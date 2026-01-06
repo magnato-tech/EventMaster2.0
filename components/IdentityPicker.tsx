@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Person } from '../types';
+import { Person, CoreRole } from '../types';
 import { Search, User } from 'lucide-react';
 
 interface Props {
@@ -14,6 +14,16 @@ const IdentityPicker: React.FC<Props> = ({ persons, onSelect }) => {
   const filtered = persons.filter(p => 
     p.name.toLowerCase().includes(search.toLowerCase()) && p.is_active
   );
+
+  const getCoreRoleLabel = (role: CoreRole) => {
+    switch (role) {
+      case CoreRole.ADMIN: return 'Administrator';
+      case CoreRole.PASTOR: return 'Pastor';
+      case CoreRole.TEAM_LEADER: return 'Gruppeleder';
+      case CoreRole.MEMBER: return 'Medlem';
+      default: return 'Gjest';
+    }
+  };
 
   return (
     <div className="min-h-screen bg-indigo-900 flex items-center justify-center p-4">
@@ -47,7 +57,7 @@ const IdentityPicker: React.FC<Props> = ({ persons, onSelect }) => {
                 </div>
                 <div className="text-left">
                   <p className="font-semibold text-slate-800">{person.name}</p>
-                  <p className="text-xs text-slate-500">{person.is_admin ? 'Administrator' : 'Medarbeider'}</p>
+                  <p className="text-xs text-slate-500">{getCoreRoleLabel(person.core_role)}</p>
                 </div>
               </button>
             ))}
