@@ -1,22 +1,25 @@
 
 import React, { useState } from 'react';
-import { AppState, EventTemplate, RoleDefinition, GroupCategory, UUID, ProgramItem } from '../types';
-import { Settings, Plus, Info, Edit3, Trash2, Shield, Repeat, X, Clock, Users } from 'lucide-react';
+// Fix: Import ServiceRole instead of non-existent RoleDefinition.
+import { AppState, EventTemplate, ServiceRole, GroupCategory, UUID, ProgramItem } from '../types';
+import { Settings, Plus, Info, Edit3, Trash2, Shield, Repeat, X, Clock, Users, Edit2 } from 'lucide-react';
 
 interface Props {
   db: AppState;
   setDb: React.Dispatch<React.SetStateAction<AppState>>;
   onCreateRecurring: (templateId: string, startDate: string, count: number, intervalDays: number) => void;
   onAddProgramItem: (item: ProgramItem) => void;
+  onUpdateProgramItem?: (id: string, updates: Partial<ProgramItem>) => void; // Added for completeness
   onDeleteProgramItem: (id: string) => void;
 }
 
-const MasterMenu: React.FC<Props> = ({ db, setDb, onCreateRecurring, onAddProgramItem, onDeleteProgramItem }) => {
+const MasterMenu: React.FC<Props> = ({ db, setDb, onCreateRecurring, onAddProgramItem, onUpdateProgramItem, onDeleteProgramItem }) => {
   const [selectedTemplate, setSelectedTemplate] = useState<EventTemplate | null>(db.eventTemplates[0] || null);
   
   const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
   const [isRecurringModalOpen, setIsRecurringModalOpen] = useState(false);
   const [isProgramModalOpen, setIsProgramModalOpen] = useState(false);
+  const [editingProgramItem, setEditingProgramItem] = useState<ProgramItem | null>(null);
 
   const [newTemplateTitle, setNewTemplateTitle] = useState('');
   const [newTemplateType, setNewTemplateType] = useState('Gudstjeneste');
@@ -52,28 +55,56 @@ const MasterMenu: React.FC<Props> = ({ db, setDb, onCreateRecurring, onAddProgra
     setSelectedTemplate(newTemplate);
   };
 
-  const handleAddProgramItem = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedTemplate || !progTitle.trim()) return;
-
-    const items = db.programItems.filter(p => p.template_id === selectedTemplate.id);
-    const newItem: ProgramItem = {
-      id: crypto.randomUUID(),
-      template_id: selectedTemplate.id,
-      title: progTitle,
-      duration_minutes: progDuration,
-      role_id: progRoleId || null,
-      group_id: progGroupId || null,
-      order: items.length
-    };
-
-    onAddProgramItem(newItem);
-
+  const handleOpenAddModal = () => {
+    setEditingProgramItem(null);
     setProgTitle('');
     setProgDuration(5);
     setProgRoleId('');
     setProgGroupId('');
+    setIsProgramModalOpen(true);
+  };
+
+  const handleOpenEditModal = (item: ProgramItem) => {
+    setEditingProgramItem(item);
+    setProgTitle(item.title);
+    setProgDuration(item.duration_minutes);
+    setProgRoleId(item.service_role_id || '');
+    setProgGroupId(item.group_id || '');
+    setIsProgramModalOpen(true);
+  };
+
+  const handleSaveProgramItem = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTemplate || !progTitle.trim()) return;
+
+    if (editingProgramItem) {
+      setDb(prev => ({
+        ...prev,
+        programItems: prev.programItems.map(p => p.id === editingProgramItem.id ? {
+          ...p,
+          title: progTitle,
+          duration_minutes: progDuration,
+          service_role_id: progRoleId || null,
+          group_id: progGroupId || null
+        } : p)
+      }));
+    } else {
+      const items = db.programItems.filter(p => p.template_id === selectedTemplate.id);
+      const newItem: ProgramItem = {
+        id: crypto.randomUUID(),
+        template_id: selectedTemplate.id,
+        title: progTitle,
+        duration_minutes: progDuration,
+        service_role_id: progRoleId || null,
+        group_id: progGroupId || null,
+        order: items.length
+      };
+      onAddProgramItem(newItem);
+    }
+
+    setProgTitle('');
     setIsProgramModalOpen(false);
+    setEditingProgramItem(null);
   };
 
   const handlePlanRecurring = (e: React.FormEvent) => {
@@ -159,7 +190,7 @@ const MasterMenu: React.FC<Props> = ({ db, setDb, onCreateRecurring, onAddProgra
                       Standard Kjøreplan
                     </h5>
                     <button 
-                      onClick={() => setIsProgramModalOpen(true)}
+                      onClick={handleOpenAddModal}
                       className="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition-colors flex items-center gap-1"
                     >
                       <Plus size={14} /> Ny Aktivitet
@@ -171,7 +202,8 @@ const MasterMenu: React.FC<Props> = ({ db, setDb, onCreateRecurring, onAddProgra
                       .filter(p => p.template_id === selectedTemplate.id)
                       .sort((a, b) => a.order - b.order)
                       .map((item, idx) => {
-                        const role = db.roleDefinitions.find(r => r.id === item.role_id);
+                        // Fix: serviceRoles and service_role_id instead of roleDefinitions/role_id
+                        const role = db.serviceRoles.find(r => r.id === item.service_role_id);
                         const group = db.groups.find(g => g.id === item.group_id);
                         return (
                           <div key={item.id} className="flex items-center gap-4 p-3 bg-slate-50 border border-slate-100 rounded-xl group">
@@ -184,7 +216,8 @@ const MasterMenu: React.FC<Props> = ({ db, setDb, onCreateRecurring, onAddProgra
                                 </span>
                                 {role && (
                                   <span className="text-[10px] text-indigo-500 font-bold uppercase tracking-wider flex items-center gap-1">
-                                    <Shield size={10} /> {role.title}
+                                    {/* Fix: role.name instead of role.title */}
+                                    <Shield size={10} /> {role.name}
                                   </span>
                                 )}
                                 {group && (
@@ -194,12 +227,20 @@ const MasterMenu: React.FC<Props> = ({ db, setDb, onCreateRecurring, onAddProgra
                                 )}
                               </div>
                             </div>
-                            <button 
-                              onClick={() => onDeleteProgramItem(item.id)}
-                              className="p-1.5 text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
-                            >
-                              <Trash2 size={14} />
-                            </button>
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-colors">
+                              <button 
+                                onClick={() => handleOpenEditModal(item)}
+                                className="p-1.5 text-slate-300 hover:text-indigo-600 transition-colors"
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                              <button 
+                                onClick={() => onDeleteProgramItem(item.id)}
+                                className="p-1.5 text-slate-300 hover:text-red-500 transition-colors"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
                           </div>
                         );
                       })}
@@ -224,10 +265,12 @@ const MasterMenu: React.FC<Props> = ({ db, setDb, onCreateRecurring, onAddProgra
                     {db.assignments
                       .filter(a => a.template_id === selectedTemplate.id)
                       .map(assign => {
-                        const role = db.roleDefinitions.find(r => r.id === assign.role_id);
+                        // Fix: serviceRoles and service_role_id instead of roleDefinitions/role_id
+                        const role = db.serviceRoles.find(r => r.id === assign.service_role_id);
                         return (
                           <div key={assign.id} className="p-4 rounded-2xl border border-slate-100 bg-slate-50/50 flex items-center justify-between group">
-                            <span className="font-semibold text-slate-700">{role?.title}</span>
+                            {/* Fix: role.name instead of role.title */}
+                            <span className="font-semibold text-slate-700">{role?.name}</span>
                           </div>
                         );
                       })}
@@ -253,13 +296,13 @@ const MasterMenu: React.FC<Props> = ({ db, setDb, onCreateRecurring, onAddProgra
 
       {isProgramModalOpen && selectedTemplate && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsProgramModalOpen(false)}></div>
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => { setIsProgramModalOpen(false); setEditingProgramItem(null); }}></div>
           <div className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 text-left">
             <div className="p-6 bg-indigo-700 text-white flex justify-between items-center">
-              <h3 className="text-xl font-bold">Ny Aktivitet</h3>
-              <button onClick={() => setIsProgramModalOpen(false)}><X size={24} /></button>
+              <h3 className="text-xl font-bold">{editingProgramItem ? 'Rediger Aktivitet' : 'Ny Aktivitet'}</h3>
+              <button onClick={() => { setIsProgramModalOpen(false); setEditingProgramItem(null); }}><X size={24} /></button>
             </div>
-            <form onSubmit={handleAddProgramItem} className="p-6 space-y-4">
+            <form onSubmit={handleSaveProgramItem} className="p-6 space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Tittel / Hva skjer?</label>
                 <input autoFocus required type="text" value={progTitle} onChange={e => setProgTitle(e.target.value)} className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all" placeholder="f.eks. Åpning & Velkomst" />
@@ -270,21 +313,23 @@ const MasterMenu: React.FC<Props> = ({ db, setDb, onCreateRecurring, onAddProgra
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Knytt til Rolle</label>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Knytt til Rolle (Katalog)</label>
                   <select value={progRoleId} onChange={e => { setProgRoleId(e.target.value); if(e.target.value) setProgGroupId(''); }} className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-sm">
-                    <option value="">Ingen (Valgfritt)</option>
-                    {db.roleDefinitions.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
+                    <option value="">Ingen valgt</option>
+                    {db.serviceRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Knytt til Team</label>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Knytt til Team (Gruppe)</label>
                   <select value={progGroupId} onChange={e => { setProgGroupId(e.target.value); if(e.target.value) setProgRoleId(''); }} className="w-full px-4 py-3 border rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-sm">
-                    <option value="">Ingen (Valgfritt)</option>
+                    <option value="">Ingen valgt</option>
                     {db.groups.filter(g => g.category === GroupCategory.SERVICE).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                   </select>
                 </div>
               </div>
-              <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg hover:bg-indigo-700 transition-all">Legg til i kjøreplan</button>
+              <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-bold shadow-lg hover:bg-indigo-700 transition-all">
+                {editingProgramItem ? 'Oppdater' : 'Legg til i kjøreplan'}
+              </button>
             </form>
           </div>
         </div>

@@ -51,11 +51,22 @@ export interface GroupMember {
   role: GroupRole;
 }
 
-export interface RoleDefinition {
+/** Global Role Catalog */
+export interface ServiceRole {
+  id: UUID;
+  name: string;
+  description?: string;
+  default_instructions: string[];
+  is_active: boolean;
+}
+
+/** Link between a Group and a ServiceRole */
+export interface GroupServiceRole {
   id: UUID;
   group_id: UUID;
-  title: string;
-  default_tasks: string[];
+  service_role_id: UUID;
+  instructions_override?: string[];
+  is_active: boolean;
 }
 
 export interface EventTemplate {
@@ -77,7 +88,7 @@ export interface Assignment {
   id: UUID;
   occurrence_id?: UUID | null;
   template_id?: UUID | null;
-  role_id: UUID;
+  service_role_id: UUID; // Point to global role
   person_id?: UUID | null;
 }
 
@@ -87,7 +98,7 @@ export interface ProgramItem {
   occurrence_id?: UUID | null;
   title: string;
   duration_minutes: number;
-  role_id?: UUID | null;
+  service_role_id?: UUID | null; // Point to global role
   group_id?: UUID | null;
   person_id?: UUID | null;
   order: number;
@@ -107,7 +118,8 @@ export interface AppState {
   persons: Person[];
   groups: Group[];
   groupMembers: GroupMember[];
-  roleDefinitions: RoleDefinition[];
+  serviceRoles: ServiceRole[];
+  groupServiceRoles: GroupServiceRole[];
   eventTemplates: EventTemplate[];
   eventOccurrences: EventOccurrence[];
   assignments: Assignment[];

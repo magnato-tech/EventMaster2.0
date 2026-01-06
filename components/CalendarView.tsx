@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
-import { AppState, EventOccurrence, RoleDefinition, UUID, ProgramItem, GroupCategory, Person } from '../types';
-import { ChevronLeft, ChevronRight, Plus, UserPlus, X, Trash2, ListChecks, Info, CheckCircle2, Calendar as CalendarIcon, Repeat, LayoutGrid, List as ListIcon, Clock, Users, User, Shield, AlertTriangle, RefreshCw, UserCheck, Sparkles, ArrowRight } from 'lucide-react';
+import { AppState, EventOccurrence, ServiceRole, UUID, ProgramItem, GroupCategory, Person } from '../types';
+import { ChevronLeft, ChevronRight, Plus, UserPlus, X, Trash2, ListChecks, Info, CheckCircle2, Calendar as CalendarIcon, Repeat, LayoutGrid, List as ListIcon, Clock, Users, User, Shield, AlertTriangle, RefreshCw, UserCheck, Sparkles, ArrowRight, Library, GripVertical, Edit2 } from 'lucide-react';
 
 interface Props {
   db: AppState;
@@ -13,26 +13,35 @@ interface Props {
   onCreateRecurring: (templateId: string, startDate: string, count: number, intervalDays: number) => void;
   onAddProgramItem: (item: ProgramItem) => void;
   onUpdateProgramItem: (id: string, updates: Partial<ProgramItem>) => void;
+  onReorderProgramItems: (occurrenceId: string, reorderedItems: ProgramItem[]) => void;
   onDeleteProgramItem: (id: string) => void;
 }
 
 const CalendarView: React.FC<Props> = ({ 
   db, isAdmin, onUpdateAssignment, onAddAssignment, onSyncStaffing, onCreateOccurrence, onCreateRecurring, 
-  onAddProgramItem, onUpdateProgramItem, onDeleteProgramItem 
+  onAddProgramItem, onUpdateProgramItem, onReorderProgramItems, onDeleteProgramItem 
 }) => {
   const [selectedOccId, setSelectedOccId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('calendar');
   const [currentDate, setCurrentDate] = useState(new Date());
   const [activeTab, setActiveTab] = useState<'staff' | 'program'>('program');
 
+  // Modal States
   const [isProgramModalOpen, setIsProgramModalOpen] = useState(false);
+  const [editingProgramItem, setEditingProgramItem] = useState<ProgramItem | null>(null);
   const [isAddRoleModalOpen, setIsAddRoleModalOpen] = useState(false);
   const [roleInstructionsId, setRoleInstructionsId] = useState<string | null>(null);
+  
+  // Form States
   const [progTitle, setProgTitle] = useState('');
   const [progDuration, setProgDuration] = useState(5);
   const [progRoleId, setProgRoleId] = useState<string>('');
   const [progGroupId, setProgGroupId] = useState<string>('');
   
+  // Drag and Drop state
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
   const occurrences = [...db.eventOccurrences].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   const selectedOcc = db.eventOccurrences.find(o => o.id === selectedOccId);
 
@@ -68,34 +77,64 @@ const CalendarView: React.FC<Props> = ({
     return db.eventOccurrences.filter(o => o.date === dateStr);
   };
 
-  const handleAddProgramItem = (e: React.FormEvent) => {
+  const handleOpenAddModal = () => {
+    setEditingProgramItem(null);
+    setProgTitle('');
+    setProgDuration(5);
+    setProgRoleId('');
+    setProgGroupId('');
+    setIsProgramModalOpen(true);
+  };
+
+  const handleOpenEditModal = (item: ProgramItem) => {
+    setEditingProgramItem(item);
+    setProgTitle(item.title);
+    setProgDuration(item.duration_minutes);
+    setProgRoleId(item.service_role_id || '');
+    setProgGroupId(item.group_id || '');
+    setIsProgramModalOpen(true);
+  };
+
+  const handleSaveProgramItem = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedOcc || !progTitle.trim()) return;
-    const items = db.programItems.filter(p => p.occurrence_id === selectedOcc.id);
-    const newItem: ProgramItem = {
-      id: crypto.randomUUID(),
-      occurrence_id: selectedOcc.id,
-      template_id: null,
-      title: progTitle,
-      duration_minutes: progDuration,
-      role_id: progRoleId || null,
-      group_id: progGroupId || null,
-      order: items.length
-    };
-    onAddProgramItem(newItem);
+
+    if (editingProgramItem) {
+      onUpdateProgramItem(editingProgramItem.id, {
+        title: progTitle,
+        duration_minutes: progDuration,
+        service_role_id: progRoleId || null,
+        group_id: progGroupId || null
+      });
+    } else {
+      const items = db.programItems.filter(p => p.occurrence_id === selectedOcc.id);
+      const newItem: ProgramItem = {
+        id: crypto.randomUUID(),
+        occurrence_id: selectedOcc.id,
+        template_id: null,
+        title: progTitle,
+        duration_minutes: progDuration,
+        service_role_id: progRoleId || null,
+        group_id: progGroupId || null,
+        order: items.length
+      };
+      onAddProgramItem(newItem);
+    }
+    
     setProgTitle('');
     setIsProgramModalOpen(false);
+    setEditingProgramItem(null);
   };
 
   const getCategorizedPersons = (roleId?: string | null, groupId?: string | null) => {
     const allActive = db.persons.filter(p => p.is_active);
     let recommended: Person[] = [];
+    
     if (roleId) {
-      const role = db.roleDefinitions.find(r => r.id === roleId);
-      if (role) {
-        const members = db.groupMembers.filter(gm => gm.group_id === role.group_id);
-        recommended = allActive.filter(p => members.some(m => m.person_id === p.id));
-      }
+      const teamLinks = db.groupServiceRoles.filter(gsr => gsr.service_role_id === roleId);
+      const teamIds = teamLinks.map(l => l.group_id);
+      const members = db.groupMembers.filter(gm => teamIds.includes(gm.group_id));
+      recommended = allActive.filter(p => members.some(m => m.person_id === p.id));
     } else if (groupId) {
       const members = db.groupMembers.filter(gm => gm.group_id === groupId);
       recommended = allActive.filter(p => members.some(m => m.person_id === p.id));
@@ -111,6 +150,27 @@ const CalendarView: React.FC<Props> = ({
     const h = Math.floor(totalMinutes / 60) % 24;
     const m = Math.floor(totalMinutes % 60);
     return `${h.toString().padStart(2, '0')}.${m.toString().padStart(2, '0')}`;
+  };
+
+  // Reordering logic
+  const handleDragStart = (index: number) => {
+    setDraggedIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    setDragOverIndex(index);
+  };
+
+  const handleDragEnd = () => {
+    if (draggedIndex !== null && dragOverIndex !== null && draggedIndex !== dragOverIndex && selectedOcc) {
+      const items = [...programWithTimes];
+      const [reorderedItem] = items.splice(draggedIndex, 1);
+      items.splice(dragOverIndex, 0, reorderedItem);
+      onReorderProgramItems(selectedOcc.id, items);
+    }
+    setDraggedIndex(null);
+    setDragOverIndex(null);
   };
 
   const programWithTimes = useMemo(() => {
@@ -129,13 +189,13 @@ const CalendarView: React.FC<Props> = ({
     });
   }, [selectedOcc, db.programItems]);
 
-  const instructionRole = db.roleDefinitions.find(rd => rd.id === roleInstructionsId);
+  const instructionRole = db.serviceRoles.find(sr => sr.id === roleInstructionsId);
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-20 md:pb-0 animate-in fade-in duration-500 text-left">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">Planleggingskalender</h2>
+          <h2 className="text-xl font-bold text-slate-800 uppercase tracking-tight">Planleggingskalender</h2>
           <p className="text-xs text-slate-500">Administrer gudstjenester og vaktplaner.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -217,7 +277,7 @@ const CalendarView: React.FC<Props> = ({
                   <div className="flex justify-between items-center border-b pb-3 border-slate-100">
                     <h2 className="text-base font-bold text-slate-800 uppercase tracking-tight">Programoversikt</h2>
                     {isAdmin && (
-                      <button onClick={() => setIsProgramModalOpen(true)} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-[11px] font-bold shadow hover:bg-indigo-700 transition-all flex items-center gap-1.5">
+                      <button onClick={handleOpenAddModal} className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-[11px] font-bold shadow hover:bg-indigo-700 transition-all flex items-center gap-1.5">
                         <Plus size={14} /> Ny Aktivitet
                       </button>
                     )}
@@ -225,14 +285,29 @@ const CalendarView: React.FC<Props> = ({
 
                   <div className="space-y-2">
                     {programWithTimes.map((item, idx) => {
-                      const role = db.roleDefinitions.find(r => r.id === item.role_id);
+                      const role = db.serviceRoles.find(r => r.id === item.service_role_id);
                       const group = db.groups.find(g => g.id === item.group_id);
                       const person = db.persons.find(p => p.id === item.person_id);
-                      const { recommended, others } = getCategorizedPersons(item.role_id, item.group_id);
+                      const { recommended, others } = getCategorizedPersons(item.service_role_id, item.group_id);
                       
+                      const isDragged = draggedIndex === idx;
+                      const isOver = dragOverIndex === idx;
+
                       return (
-                        <div key={item.id} className="p-3 bg-white border border-slate-100 rounded-xl hover:border-indigo-200 transition-all text-left group">
-                          <div className="flex items-center gap-4">
+                        <div 
+                          key={item.id} 
+                          draggable={isAdmin}
+                          onDragStart={() => handleDragStart(idx)}
+                          onDragOver={(e) => handleDragOver(e, idx)}
+                          onDragEnd={handleDragEnd}
+                          className={`p-3 bg-white border rounded-xl transition-all text-left group flex items-center gap-4 ${isDragged ? 'opacity-30' : 'opacity-100'} ${isOver ? 'border-indigo-500 bg-indigo-50/30' : 'border-slate-100 hover:border-indigo-200'}`}
+                        >
+                          {isAdmin && (
+                            <div className="cursor-grab active:cursor-grabbing p-1 text-slate-300 hover:text-slate-500">
+                              <GripVertical size={16} />
+                            </div>
+                          )}
+                          <div className="flex items-center gap-4 flex-1">
                             <div className="flex flex-col items-center shrink-0 w-14 text-center border-r pr-4">
                               <span className="text-xs font-bold text-indigo-600 leading-none mb-1">{item.formattedTime}</span>
                               <span className="text-[9px] text-slate-400 font-bold uppercase tracking-tighter">{item.duration_minutes}m</span>
@@ -241,13 +316,18 @@ const CalendarView: React.FC<Props> = ({
                               <div className="flex justify-between items-center">
                                 <h5 className="font-bold text-slate-800 text-sm truncate mr-2">{item.title}</h5>
                                 {isAdmin && (
-                                  <button onClick={() => onDeleteProgramItem(item.id)} className="text-slate-200 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all">
-                                    <Trash2 size={14}/>
-                                  </button>
+                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                    <button onClick={() => handleOpenEditModal(item)} className="p-1 text-slate-400 hover:text-indigo-600">
+                                      <Edit2 size={14}/>
+                                    </button>
+                                    <button onClick={() => onDeleteProgramItem(item.id)} className="p-1 text-slate-400 hover:text-red-500">
+                                      <Trash2 size={14}/>
+                                    </button>
+                                  </div>
                                 )}
                               </div>
                               <div className="flex items-center gap-3 mt-1">
-                                {role && <span className="text-[9px] text-indigo-600 font-bold uppercase tracking-wider bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 flex items-center gap-1"><Shield size={10}/> {role.title}</span>}
+                                {role && <span className="text-[9px] text-indigo-600 font-bold uppercase tracking-wider bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 flex items-center gap-1"><Library size={10}/> {role.name}</span>}
                                 {group && <span className="text-[9px] text-teal-600 font-bold uppercase tracking-wider bg-teal-50 px-1.5 py-0.5 rounded border border-teal-100 flex items-center gap-1"><Users size={10}/> {group.name}</span>}
                                 
                                 <div className="ml-auto min-w-[180px]">
@@ -257,13 +337,13 @@ const CalendarView: React.FC<Props> = ({
                                       value={item.person_id || ''}
                                       onChange={(e) => onUpdateProgramItem(item.id, { person_id: e.target.value || null })}
                                     >
-                                      <option value="">Tildel...</option>
+                                      <option value="">Tildel person...</option>
                                       {recommended.length > 0 && (
-                                        <optgroup label="Team">
+                                        <optgroup label="Anbefalt Team">
                                           {recommended.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                                         </optgroup>
                                       )}
-                                      <optgroup label="Alle">
+                                      <optgroup label="Alle Personer">
                                         {others.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                                       </optgroup>
                                     </select>
@@ -280,11 +360,6 @@ const CalendarView: React.FC<Props> = ({
                         </div>
                       );
                     })}
-                    {programWithTimes.length === 0 && (
-                      <div className="py-12 text-center border-2 border-dashed border-slate-50 rounded-xl">
-                        <p className="text-slate-300 text-xs">Ingen aktiviteter lagt til.</p>
-                      </div>
-                    )}
                   </div>
                 </div>
               ) : (
@@ -316,16 +391,16 @@ const CalendarView: React.FC<Props> = ({
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {db.assignments.filter(a => a.occurrence_id === selectedOcc.id).map(assign => {
-                        const role = db.roleDefinitions.find(r => r.id === assign.role_id);
+                        const role = db.serviceRoles.find(r => r.id === assign.service_role_id);
                         const person = db.persons.find(p => p.id === assign.person_id);
-                        const { recommended, others } = getCategorizedPersons(assign.role_id);
+                        const { recommended, others } = getCategorizedPersons(assign.service_role_id);
                         return (
                           <div key={assign.id} className={`p-3 bg-white border rounded-xl shadow-sm flex flex-col gap-2 transition-all ${person ? 'border-slate-100' : 'border-amber-100 bg-amber-50/20'}`}>
                             <div className="flex justify-between items-start">
                               <div className="flex items-center gap-2">
-                                <Shield size={12} className="text-indigo-400" />
+                                <Library size={12} className="text-indigo-400" />
                                 <div className="flex items-center gap-1.5">
-                                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none">{role?.title}</p>
+                                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-none">{role?.name}</p>
                                   {role && (
                                     <button 
                                       onClick={() => setRoleInstructionsId(role.id)} 
@@ -352,11 +427,11 @@ const CalendarView: React.FC<Props> = ({
                               >
                                 <option value="">Tildel person...</option>
                                 {recommended.length > 0 && (
-                                  <optgroup label="Team">
+                                  <optgroup label="Anbefalt Team">
                                     {recommended.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                                   </optgroup>
                                 )}
-                                <optgroup label="Alle">
+                                <optgroup label="Alle Personer">
                                   {others.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                                 </optgroup>
                               </select>
@@ -364,11 +439,6 @@ const CalendarView: React.FC<Props> = ({
                           </div>
                         );
                       })}
-                      {db.assignments.filter(a => a.occurrence_id === selectedOcc.id).length === 0 && (
-                        <div className="col-span-full py-12 text-center border-2 border-dashed border-slate-50 rounded-xl">
-                          <p className="text-slate-300 text-xs">Vaktlisten er tom.</p>
-                        </div>
-                      )}
                     </div>
                   </section>
                 </div>
@@ -377,114 +447,113 @@ const CalendarView: React.FC<Props> = ({
           </div>
 
           <div className="px-6 py-4 bg-slate-900 border-t shrink-0 flex justify-end items-center text-white">
-            <button onClick={() => setSelectedOccId(null)} className="px-8 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-lg hover:bg-indigo-700 transition-all flex items-center gap-2">
+            <button onClick={() => setSelectedOccId(null)} className="px-8 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-lg flex items-center gap-2">
               <CheckCircle2 size={16} /> Ferdig planlagt
             </button>
           </div>
         </div>
       )}
 
-      {/* Instruks-Modal for Roller */}
+      {/* Instruks-Modal */}
       {roleInstructionsId && instructionRole && (
         <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="relative bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden animate-in zoom-in-95 duration-200 text-left">
+          <div className="relative bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden animate-in zoom-in-95 text-left">
             <div className="p-4 bg-indigo-700 text-white flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <Info size={18} />
-                <h3 className="text-sm font-bold">Instruks: {instructionRole.title}</h3>
-              </div>
+              <div className="flex items-center gap-2"><Info size={18} /><h3 className="text-sm font-bold">Instruks: {instructionRole.name}</h3></div>
               <button onClick={() => setRoleInstructionsId(null)}><X size={18} /></button>
             </div>
             <div className="p-5 space-y-4">
               <div className="space-y-2.5">
-                {instructionRole.default_tasks.length > 0 ? (
-                  instructionRole.default_tasks.filter(t => t.trim()).map((task, i) => (
-                    <div key={i} className="flex gap-3 text-left items-start">
-                      <div className="mt-1 w-4 h-4 rounded-full border-2 border-indigo-200 flex-shrink-0 flex items-center justify-center">
-                        <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                      </div>
-                      <p className="text-slate-600 text-xs leading-relaxed font-medium">{task}</p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-slate-400 text-xs italic text-center py-4">Ingen spesifikke instrukser er definert for denne rollen.</p>
-                )}
+                {instructionRole.default_instructions.map((task, i) => (
+                  <div key={i} className="flex gap-3 items-start">
+                    <div className="mt-1 w-4 h-4 rounded-full border-2 border-indigo-200 flex-shrink-0" />
+                    <p className="text-slate-600 text-xs leading-relaxed font-medium">{task}</p>
+                  </div>
+                ))}
               </div>
-              <button 
-                onClick={() => setRoleInstructionsId(null)} 
-                className="w-full py-2 bg-slate-100 text-slate-600 rounded-xl font-bold text-xs hover:bg-slate-200 transition-all"
-              >
-                Lukk
-              </button>
+              <button onClick={() => setRoleInstructionsId(null)} className="w-full py-2 bg-slate-100 text-slate-600 rounded-xl font-bold text-xs">Lukk</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modals for Adding Program/Role - Standard compact sizes */}
+      {/* Velg fra katalog modal */}
       {isAddRoleModalOpen && selectedOcc && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="relative bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden animate-in zoom-in-95 duration-200 text-left">
-            <div className="p-4 bg-indigo-700 text-white flex justify-between items-center">
-              <h3 className="text-sm font-bold">Legg til tjeneste</h3>
-              <button onClick={() => setIsAddRoleModalOpen(false)}><X size={18} /></button>
-            </div>
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
+          <div className="relative bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden text-left animate-in zoom-in-95">
+            <div className="p-4 bg-indigo-700 text-white flex justify-between items-center"><h3 className="text-sm font-bold uppercase tracking-tight">Velg rolle fra katalog</h3><button onClick={() => setIsAddRoleModalOpen(false)}><X size={18}/></button></div>
             <div className="p-4 space-y-2 max-h-[60vh] overflow-y-auto">
-              {db.roleDefinitions.map(role => {
-                const alreadyExists = db.assignments.some(a => a.occurrence_id === selectedOcc.id && a.role_id === role.id);
-                return (
-                  <button 
-                    key={role.id} 
-                    disabled={alreadyExists}
-                    onClick={() => { onAddAssignment(selectedOcc.id, role.id); setIsAddRoleModalOpen(false); }}
-                    className={`w-full p-3 rounded-lg border text-left flex justify-between items-center transition-all ${alreadyExists ? 'bg-slate-50 border-slate-100 opacity-50 cursor-not-allowed' : 'bg-white border-slate-100 hover:border-indigo-500 hover:bg-indigo-50'}`}
-                  >
-                    <div>
-                      <p className="font-bold text-slate-800 text-xs">{role.title}</p>
-                      <p className="text-[9px] text-slate-400 font-bold uppercase mt-0.5">{db.groups.find(g => g.id === role.group_id)?.name}</p>
-                    </div>
-                    {alreadyExists ? <CheckCircle2 size={14} className="text-emerald-500" /> : <Plus size={14} className="text-indigo-400" />}
-                  </button>
-                );
-              })}
+              {db.serviceRoles.map(sr => (
+                <button key={sr.id} onClick={() => { onAddAssignment(selectedOcc.id, sr.id); setIsAddRoleModalOpen(false); }} className="w-full p-3 rounded-lg border text-left flex justify-between items-center hover:border-indigo-500 hover:bg-indigo-50 transition-all">
+                  <div className="font-bold text-slate-800 text-xs">{sr.name}</div>
+                  <Plus size={14} className="text-indigo-400" />
+                </button>
+              ))}
             </div>
           </div>
         </div>
       )}
 
+      {/* Program Item Add/Edit Modal */}
       {isProgramModalOpen && selectedOcc && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="relative bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden animate-in zoom-in-95 duration-200 text-left">
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
+          <div className="relative bg-white w-full max-w-sm rounded-2xl shadow-xl overflow-hidden text-left animate-in zoom-in-95">
             <div className="p-4 bg-indigo-700 text-white flex justify-between items-center">
-              <h3 className="text-sm font-bold">Ny Aktivitet</h3>
-              <button onClick={() => setIsProgramModalOpen(false)}><X size={18} /></button>
+              <h3 className="text-sm font-bold">{editingProgramItem ? 'Rediger Aktivitet' : 'Ny Aktivitet'}</h3>
+              <button onClick={() => { setIsProgramModalOpen(false); setEditingProgramItem(null); }}><X size={18} /></button>
             </div>
-            <form onSubmit={handleAddProgramItem} className="p-5 space-y-4">
+            <form onSubmit={handleSaveProgramItem} className="p-5 space-y-4">
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Tittel</label>
-                <input autoFocus required type="text" value={progTitle} onChange={e => setProgTitle(e.target.value)} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm" placeholder="f.eks. Velkomst" />
+                <input 
+                  autoFocus 
+                  required 
+                  type="text" 
+                  value={progTitle} 
+                  onChange={e => setProgTitle(e.target.value)} 
+                  className="w-full px-3 py-2 border rounded-lg text-sm" 
+                  placeholder="f.eks. Lovsang x3" 
+                />
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Varighet (min)</label>
-                <input required type="number" min="1" value={progDuration} onChange={e => setProgDuration(parseInt(e.target.value) || 5)} className="w-full px-3 py-2 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm" />
+                <input 
+                  required 
+                  type="number" 
+                  min="1" 
+                  value={progDuration} 
+                  onChange={e => setProgDuration(parseInt(e.target.value) || 5)} 
+                  className="w-full px-3 py-2 border rounded-lg text-sm" 
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Rolle</label>
-                  <select value={progRoleId} onChange={e => { setProgRoleId(e.target.value); if(e.target.value) setProgGroupId(''); }} className="w-full px-2 py-2 border rounded-lg text-[11px] font-medium outline-none">
-                    <option value="">Ingen</option>
-                    {db.roleDefinitions.map(r => <option key={r.id} value={r.id}>{r.title}</option>)}
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Rolle (Katalog)</label>
+                  <select 
+                    value={progRoleId} 
+                    onChange={e => setProgRoleId(e.target.value)} 
+                    className="w-full px-2 py-2 border rounded-lg text-[11px] font-medium"
+                  >
+                    <option value="">Ingen valgt</option>
+                    {db.serviceRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                   </select>
+                  <p className="text-[8px] text-slate-400 mt-1 italic">Administrer roller under "Teams & Grupper"</p>
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Team</label>
-                  <select value={progGroupId} onChange={e => { setProgGroupId(e.target.value); if(e.target.value) setProgRoleId(''); }} className="w-full px-2 py-2 border rounded-lg text-[11px] font-medium outline-none">
-                    <option value="">Ingen</option>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Team (Gruppe)</label>
+                  <select 
+                    value={progGroupId} 
+                    onChange={e => setProgGroupId(e.target.value)} 
+                    className="w-full px-2 py-2 border rounded-lg text-[11px] font-medium"
+                  >
+                    <option value="">Ingen valgt</option>
                     {db.groups.filter(g => g.category === GroupCategory.SERVICE).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                   </select>
                 </div>
               </div>
-              <button type="submit" className="w-full py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow-md hover:bg-indigo-700 transition-all">Lagre i kjøreplan</button>
+              <button type="submit" className="w-full py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-xs shadow-md hover:bg-indigo-700 transition-all">
+                {editingProgramItem ? 'Oppdater' : 'Lagre'}
+              </button>
             </form>
           </div>
         </div>

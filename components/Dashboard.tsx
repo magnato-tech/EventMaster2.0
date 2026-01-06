@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-// Fix: Import EventOccurrence to use in the updated type definition.
-import { AppState, Person, GroupCategory, RoleDefinition, Assignment, UUID, EventOccurrence } from '../types';
+// Fix: Import ServiceRole instead of non-existent RoleDefinition.
+import { AppState, Person, GroupCategory, ServiceRole, Assignment, UUID, EventOccurrence } from '../types';
 import { Calendar, Users, Bell, ArrowRight, ListChecks, Info, X, CheckCircle2, Clock, User, Shield } from 'lucide-react';
 
 interface Props {
@@ -11,15 +11,16 @@ interface Props {
 }
 
 const Dashboard: React.FC<Props> = ({ db, currentUser, onGoToWheel, onViewGroup }) => {
-  // Fix: Add the 'occurrence' property to the type definition for 'selectedAssignment'.
-  const [selectedAssignment, setSelectedAssignment] = useState<(Assignment & { occurrence: EventOccurrence, role: RoleDefinition | undefined }) | null>(null);
+  // Fix: Use ServiceRole instead of RoleDefinition.
+  const [selectedAssignment, setSelectedAssignment] = useState<(Assignment & { occurrence: EventOccurrence, role: ServiceRole | undefined }) | null>(null);
 
   // 1. Mine Tjenester
+  // Fix: Use serviceRoles and service_role_id correctly.
   const myAssignments = db.assignments
     .filter(a => a.person_id === currentUser.id && a.occurrence_id)
     .map(a => {
       const occ = db.eventOccurrences.find(o => o.id === a.occurrence_id);
-      const role = db.roleDefinitions.find(r => r.id === a.role_id);
+      const role = db.serviceRoles.find(r => r.id === a.service_role_id);
       return { ...a, occurrence: occ, role };
     })
     .filter((a): a is typeof a & { occurrence: EventOccurrence } => !!a.occurrence)
@@ -86,7 +87,8 @@ const Dashboard: React.FC<Props> = ({ db, currentUser, onGoToWheel, onViewGroup 
                     <div>
                       <h4 className="font-bold text-slate-800 text-left">{assign.occurrence.title_override || db.eventTemplates.find(t => t.id === assign.occurrence.template_id)?.title}</h4>
                       <div className="text-sm text-indigo-600 font-bold uppercase tracking-wider flex items-center gap-1">
-                        {assign.role?.title}
+                        {/* Fix: role.name instead of role.title */}
+                        {assign.role?.name}
                       </div>
                     </div>
                   </div>
@@ -154,9 +156,7 @@ const Dashboard: React.FC<Props> = ({ db, currentUser, onGoToWheel, onViewGroup 
           <div className="relative bg-white w-full max-w-4xl rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
             <div className="p-8 bg-indigo-700 text-white flex justify-between items-start text-left">
               <div>
-                {/* Fix: Access occurrence property directly as its existence is guaranteed by the type. */}
                 <p className="text-xs font-bold uppercase tracking-widest text-indigo-200 mb-1">{new Intl.DateTimeFormat('no-NO', { dateStyle: 'full' }).format(new Date(selectedAssignment.occurrence.date))}</p>
-                {/* Fix: Access occurrence property directly as its existence is guaranteed by the type. */}
                 <h3 className="text-3xl font-bold">{selectedAssignment.occurrence.title_override || db.eventTemplates.find(t => t.id === selectedAssignment.occurrence.template_id)?.title}</h3>
               </div>
               <button 
@@ -171,9 +171,11 @@ const Dashboard: React.FC<Props> = ({ db, currentUser, onGoToWheel, onViewGroup 
               <div className="space-y-6">
                 <section className="bg-indigo-50 border border-indigo-100 p-6 rounded-3xl">
                   <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-3">Min Rolle</h4>
-                  <p className="text-2xl font-bold text-indigo-800">{selectedAssignment.role?.title}</p>
+                  {/* Fix: role.name instead of role.title */}
+                  <p className="text-2xl font-bold text-indigo-800">{selectedAssignment.role?.name}</p>
                   <div className="space-y-3 mt-4">
-                    {selectedAssignment.role?.default_tasks.filter(t => t.trim().length > 0).map((task, i) => (
+                    {/* Fix: default_instructions instead of default_tasks */}
+                    {selectedAssignment.role?.default_instructions.filter(t => t.trim().length > 0).map((task, i) => (
                       <div key={i} className="flex gap-3 text-left">
                         <CheckCircle2 size={18} className="text-indigo-400 mt-1 shrink-0" />
                         <p className="text-indigo-900/80 leading-relaxed font-medium">{task}</p>
@@ -186,14 +188,16 @@ const Dashboard: React.FC<Props> = ({ db, currentUser, onGoToWheel, onViewGroup 
                    <div className="space-y-2">
                      {db.assignments.filter(a => a.occurrence_id === selectedAssignment.occurrence_id && a.person_id).map(a => {
                        const person = db.persons.find(p => p.id === a.person_id);
-                       const role = db.roleDefinitions.find(r => r.id === a.role_id);
+                       // Fix: serviceRoles and service_role_id instead of roleDefinitions/role_id
+                       const role = db.serviceRoles.find(r => r.id === a.service_role_id);
                        if (!person) return null;
                        return (
                          <div key={a.id} className={`flex items-center gap-3 p-3 rounded-2xl ${a.person_id === currentUser.id ? 'bg-indigo-50' : 'bg-slate-50'}`}>
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${a.person_id === currentUser.id ? 'bg-indigo-200 text-indigo-700' : 'bg-slate-200 text-slate-600'}`}>{person.name.charAt(0)}</div>
                             <div>
                               <p className="font-bold text-sm text-slate-800">{person.name}</p>
-                              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{role?.title}</p>
+                              {/* Fix: role.name instead of role.title */}
+                              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{role?.name}</p>
                             </div>
                          </div>
                        )
@@ -206,13 +210,15 @@ const Dashboard: React.FC<Props> = ({ db, currentUser, onGoToWheel, onViewGroup 
                 <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Kjøreplan</h4>
                 <div className="space-y-2">
                   {programWithTimes.map(item => {
-                    const responsible = item.role_id 
-                      ? db.roleDefinitions.find(r => r.id === item.role_id)?.title 
+                    // Fix: serviceRoles and service_role_id instead of roleDefinitions/role_id
+                    const responsible = item.service_role_id 
+                      ? db.serviceRoles.find(r => r.id === item.service_role_id)?.name 
                       : item.group_id
                       ? db.groups.find(g => g.id === item.group_id)?.name
                       : null;
 
-                    const isMyItem = item.person_id === currentUser.id || item.role_id === selectedAssignment.role_id;
+                    // Fix: service_role_id correctly used
+                    const isMyItem = item.person_id === currentUser.id || item.service_role_id === selectedAssignment.service_role_id;
                     
                     return (
                       <div key={item.id} className={`flex items-start gap-4 p-4 rounded-2xl border ${isMyItem ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-slate-100'}`}>

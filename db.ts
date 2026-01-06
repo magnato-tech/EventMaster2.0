@@ -1,4 +1,3 @@
-
 import { AppState, UUID, Assignment, Task, EventOccurrence, ProgramItem, OccurrenceStatus } from './types';
 import { INITIAL_DATA } from './constants';
 
@@ -26,23 +25,25 @@ export const performBulkCopy = (occurrence: EventOccurrence, state: AppState): A
   const templateAssignments = state.assignments.filter(a => a.template_id === occurrence.template_id);
   
   // Create local copies of assignments for this occurrence
+  // Fix: Use service_role_id instead of non-existent role_id
   const newAssignments: Assignment[] = templateAssignments.map(ta => ({
     id: crypto.randomUUID(),
     occurrence_id: occurrence.id,
     template_id: null,
-    role_id: ta.role_id,
+    service_role_id: ta.service_role_id,
     person_id: ta.person_id // Inherit person if one is set in master (default staff)
   }));
 
   // Create local copies of program items for this occurrence
   const templateProgramItems = state.programItems.filter(p => p.template_id === occurrence.template_id);
+  // Fix: Use service_role_id instead of non-existent role_id
   const newProgramItems: ProgramItem[] = templateProgramItems.map(tp => ({
     id: crypto.randomUUID(),
     occurrence_id: occurrence.id,
     template_id: null,
     title: tp.title,
     duration_minutes: tp.duration_minutes,
-    role_id: tp.role_id,
+    service_role_id: tp.service_role_id,
     group_id: tp.group_id,
     person_id: tp.person_id, // Inherit person if set in master
     order: tp.order
